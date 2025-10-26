@@ -26,8 +26,8 @@ if not GEMINI_API_KEY:
 else:
     genai.configure(api_key=GEMINI_API_KEY)
     
-# Initialize Gemini model
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Initialize Gemini model (using gemini-2.0-flash which is stable and fast)
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 # In-memory storage for conversations
 conversations = {}
