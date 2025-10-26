@@ -8,9 +8,6 @@ from datetime import datetime
 import re
 import base64
 import mimetypes
-from io import BytesIO
-from PIL import Image
-import google.generativeai as genai
 
 load_dotenv()
 
@@ -19,24 +16,12 @@ app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Configuration
-API_KEY = os.getenv('GEMINI_API_KEY')
-if not API_KEY or API_KEY == 'your_gemini_api_key_here':
-    print("⚠️  WARNING: GEMINI_API_KEY not configured!")
+# Configuration - Perplexity API
+PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API_KEY')
+if not PERPLEXITY_API_KEY:
+    print("⚠️  WARNING: PERPLEXITY_API_KEY not configured!")
     print("Please set your API key in backend/.env file")
-    print("Get your key from: https://aistudio.google.com/app/apikey")
-    API_KEY = None
-else:
-    genai.configure(api_key=API_KEY)
-
-# Generative AI models
-vision_model = None
-if API_KEY:
-    try:
-        vision_model = genai.GenerativeModel('gemini-2.0-flash')
-    except Exception as e:
-        print(f"⚠️  Error initializing vision model: {e}")
-        vision_model = None
+    PERPLEXITY_API_KEY = None
 
 # In-memory storage for conversations
 conversations = {}
@@ -134,46 +119,21 @@ def delete_conversation(conv_id):
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Send a message and get a response, with optional file attachment"""
+    """Send a message and get a response using Perplexity API"""
     try:
         # Check if API key is configured
-        if not API_KEY or API_KEY == 'your_gemini_api_key_here':
+        if not PERPLEXITY_API_KEY:
             return jsonify({
                 'success': False,
-                'error': 'API key not configured. Please set GEMINI_API_KEY in backend/.env file'
+                'error': 'API key not configured. Please set PERPLEXITY_API_KEY in environment variables'
             }), 500
         
-        if not vision_model:
-            return jsonify({
-                'success': False,
-                'error': 'Vision model not initialized. Check your API key.'
-            }), 500
-        
-        user_message = request.form.get('message', '')
-        conv_id = request.form.get('conversation_id')
-        language = request.form.get('language', 'English')
+        user_message = request.form.get('message', '') or request.get_json().get('message', '')
+        conv_id = request.form.get('conversation_id') or request.get_json().get('conversation_id') if request.is_json else request.form.get('conversation_id')
+        language = request.form.get('language', 'English') or request.get_json().get('language', 'English') if request.is_json else 'English'
         
         if not conv_id:
             conv_id = conv_manager.create_conversation()
-        
-        # Handle file upload
-        file_data = None
-        file_mime_type = None
-        file_name = None
-        
-        if 'file' in request.files:
-            file = request.files['file']
-            if file and file.filename:
-                file_name = file.filename
-                file_content = file.read()
-                file_mime_type = file.mimetype or mimetypes.guess_type(file_name)[0]
-                
-                # Validate file
-                valid_types = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-                if file_mime_type not in valid_types:
-                    return jsonify({'success': False, 'error': 'Invalid file type'}), 400
-                
-                file_data = base64.standard_b64encode(file_content).decode('utf-8')
         
         # Add user message to conversation
         conv_manager.add_message(conv_id, 'user', user_message)
@@ -181,31 +141,69 @@ def chat():
         # Get conversation history for context
         conversation = conv_manager.get_conversation(conv_id)
         
+        # Build messages array with conversation history
+        messages = []
+        
         # System prompt
-        system_prompt = f"""You are AnuragBot, the official and highly professional AI assistant for Anurag University in Telangana, India. PRIORITIZE CONCISENESS: Ensure all responses are brief, direct, and limited to only the essential facts. Respond in a very polite, friendly, and human-like conversational tone, avoiding technical jargon where possible. Your primary goal is to provide accurate, up-to-date, and concise information to parents, students, and visitors regarding the university. Use Google Search grounding to verify all facts, especially for admissions, academic programs, and current events related to "Anurag University". IMPORTANT: If the user asks a question that is NOT related to Anurag University (e.g., general knowledge, other universities, politics), you MUST politely decline the request by saying something like: "I apologize, but I am trained specifically to assist with queries related to Anurag University. Can I help you with information about our admissions, courses, or campus life?". You must use the existing conversation history to maintain context and answer follow-up questions. ALWAYS respond entirely in the requested language, which is: ${language}."""
+        system_prompt = f"""You are AnuragBot, the official and highly professional AI assistant for Anurag University in Telangana, India. 
+
+PRIORITIZE CONCISENESS: Ensure all responses are brief, direct, and limited to only the essential facts. Respond in a very polite, friendly, and human-like conversational tone, avoiding technical jargon where possible.
+
+Your primary goal is to provide accurate, up-to-date, and concise information to parents, students, and visitors regarding the university. Use search to verify all facts, especially for admissions, academic programs, and current events related to "Anurag University".
+
+IMPORTANT: If the user asks a question that is NOT related to Anurag University (e.g., general knowledge, other universities, politics), you MUST politely decline the request by saying something like: "I apologize, but I am trained specifically to assist with queries related to Anurag University. Can I help you with information about our admissions, courses, or campus life?"
+
+ALWAYS respond entirely in the requested language, which is: {language}."""
+
+        messages.append({
+            "role": "system",
+            "content": system_prompt
+        })
         
-        # Build message content with system prompt and user message
-        message_content = [{'text': system_prompt + '\n\n' + user_message}]
-        
-        if file_data and file_mime_type:
-            message_content.append({
-                'inline_data': {
-                    'mime_type': file_mime_type,
-                    'data': file_data
-                }
+        # Add conversation history (last 10 messages for context)
+        for msg in conversation['messages'][-10:]:
+            messages.append({
+                "role": "user" if msg['role'] == 'user' else "assistant",
+                "content": msg['content']
             })
         
         try:
-            # Use Google Generative AI SDK for better file handling
-            response = vision_model.generate_content(
-                message_content,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=2048,
-                ),
+            # Call Perplexity API
+            response = requests.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.1-sonar-small-128k-online",
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                    "top_p": 0.9,
+                    "search_domain_filter": ["anurag.edu.in"],
+                    "return_citations": True,
+                    "search_recency_filter": "month"
+                },
+                timeout=30
             )
             
-            bot_response = response.text if response.text else "I apologize, but I could not generate a response. Please try again."
+            if response.status_code != 200:
+                error_msg = f"Perplexity API Error: {response.status_code} - {response.text}"
+                print(f"❌ Chat error: {error_msg}")
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'conversation_id': conv_id
+                }), 500
+            
+            response_data = response.json()
+            bot_response = response_data['choices'][0]['message']['content']
+            
+            # Extract citations if available
+            sources = []
+            if 'citations' in response_data:
+                sources = response_data['citations']
             
             # Add bot response to conversation
             conv_manager.add_message(conv_id, 'assistant', bot_response)
@@ -213,12 +211,21 @@ def chat():
             return jsonify({
                 'success': True,
                 'response': bot_response,
-                'sources': [],
+                'sources': sources,
                 'conversation_id': conv_id
             })
         
+        except requests.exceptions.Timeout:
+            error_msg = "Request timeout. Please try again."
+            print(f"❌ Timeout error")
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'conversation_id': conv_id
+            }), 504
+            
         except Exception as e:
-            error_msg = f"Gemini API Error: {str(e)}"
+            error_msg = f"Perplexity API Error: {str(e)}"
             print(f"❌ Chat error: {error_msg}")
             conv_manager.add_message(conv_id, 'assistant', 
                 f"Sorry, I encountered an error: {str(e)[:100]}")
