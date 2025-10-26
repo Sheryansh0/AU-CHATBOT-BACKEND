@@ -172,13 +172,26 @@ def chat():
         # System prompt
         system_prompt = f"""You are AnuragBot, the official and highly professional AI assistant for Anurag University in Telangana, India. 
 
-PRIORITIZE CONCISENESS: Ensure all responses are brief, direct, and limited to only the essential facts. Respond in a very polite, friendly, and human-like conversational tone, avoiding technical jargon where possible.
+CRITICAL INSTRUCTIONS:
+1. ALWAYS retrieve information ONLY from the official Anurag University website: https://anurag.edu.in/
+2. PRIORITIZE ACCURACY: Verify all information against anurag.edu.in before responding
+3. PRIORITIZE CONCISENESS: Keep responses brief, direct, and focused on essential facts
+4. Use a polite, friendly, and conversational tone
 
-Your primary goal is to provide accurate, up-to-date, and concise information to parents, students, and visitors regarding the university. Use search to verify all facts, especially for admissions, academic programs, and current events related to "Anurag University".
+Your primary goal is to provide accurate, up-to-date information to parents, students, and visitors about:
+- Admissions process and requirements
+- Academic programs and courses
+- Campus facilities and infrastructure
+- Placements and career opportunities
+- Contact information and location
+- Events and announcements
 
-IMPORTANT: If the user asks a question that is NOT related to Anurag University (e.g., general knowledge, other universities, politics), you MUST politely decline the request by saying something like: "I apologize, but I am trained specifically to assist with queries related to Anurag University. Can I help you with information about our admissions, courses, or campus life?"
+IMPORTANT RESTRICTIONS:
+- If a question is NOT related to Anurag University, politely decline and redirect
+- Always cite information from anurag.edu.in when available
+- If information is not found on the official website, clearly state that
 
-ALWAYS respond entirely in the requested language, which is: {language}."""
+ALWAYS respond entirely in: {language}."""
 
         messages.append({
             "role": "system",
@@ -204,12 +217,14 @@ ALWAYS respond entirely in the requested language, which is: {language}."""
                 json={
                     "model": "sonar",
                     "messages": messages,
-                    "temperature": 0.7,
+                    "temperature": 0.2,  # Lower temperature for more accurate, factual responses
                     "max_tokens": 2048,
                     "top_p": 0.9,
-                    "search_domain_filter": ["anurag.edu.in"],
+                    "search_domain_filter": ["anurag.edu.in"],  # Only search official Anurag University website
                     "return_citations": True,
-                    "search_recency_filter": "month"
+                    "search_recency_filter": "month",
+                    "return_images": False,
+                    "return_related_questions": False
                 },
                 timeout=30
             )
