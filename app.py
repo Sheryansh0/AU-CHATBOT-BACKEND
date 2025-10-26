@@ -202,7 +202,7 @@ ALWAYS respond entirely in the requested language, which is: {language}."""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.1-sonar-small-128k-online",
+                    "model": "sonar",
                     "messages": messages,
                     "temperature": 0.7,
                     "max_tokens": 2048,
