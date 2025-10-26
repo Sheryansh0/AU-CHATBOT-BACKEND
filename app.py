@@ -14,7 +14,11 @@ import google.generativeai as genai
 
 load_dotenv()
 
-app = Flask(__name__, template_folder='../frontend/dist', static_folder='../frontend/dist')
+# Configure Flask to serve the React frontend
+template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'dist')
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'dist')
+
+app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='')
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -95,6 +99,15 @@ conv_manager = ConversationManager()
 
 @app.route('/')
 def index():
+    return render_template('index.html')
+
+@app.route('/<path:path>')
+def catch_all(path):
+    """Serve React app for all non-API routes"""
+    if path.startswith('api/'):
+        # Let API routes 404 if not found
+        return jsonify({'error': 'API endpoint not found'}), 404
+    # Serve React index.html for client-side routing
     return render_template('index.html')
 
 @app.route('/api/conversations', methods=['GET'])
