@@ -2,12 +2,13 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
-import requests
-import json
+import google.generativeai as genai
 from datetime import datetime
 import re
 import base64
 import mimetypes
+from PIL import Image
+import io
 
 load_dotenv()
 
@@ -16,12 +17,17 @@ app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Configuration - Perplexity API
-PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API_KEY')
-if not PERPLEXITY_API_KEY:
-    print("⚠️  WARNING: PERPLEXITY_API_KEY not configured!")
+# Configuration - Gemini API
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    print("⚠️  WARNING: GEMINI_API_KEY not configured!")
     print("Please set your API key in backend/.env file")
-    PERPLEXITY_API_KEY = None
+    GEMINI_API_KEY = None
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+# Initialize Gemini model
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # In-memory storage for conversations
 conversations = {}
@@ -119,15 +125,15 @@ def delete_conversation(conv_id):
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Send a message and get a response using Perplexity API"""
+    """Send a message and get a response using Gemini API"""
     try:
         # Log API key status (without exposing the actual key)
-        api_key_status = "configured" if PERPLEXITY_API_KEY else "missing"
+        api_key_status = "configured" if GEMINI_API_KEY else "missing"
         print(f"🔑 API Key Status: {api_key_status}")
         
         # Check if API key is configured
-        if not PERPLEXITY_API_KEY:
-            error_msg = 'PERPLEXITY_API_KEY environment variable is not set on Render. Please add it in Environment settings.'
+        if not GEMINI_API_KEY:
+            error_msg = 'GEMINI_API_KEY environment variable is not set. Please add it in Environment settings.'
             print(f"❌ {error_msg}")
             return jsonify({
                 'success': False,
@@ -140,11 +146,15 @@ def chat():
             user_message = data.get('message', '')
             conv_id = data.get('conversation_id')
             language = data.get('language', 'English')
+            image_data = data.get('image')
+            file_data = data.get('file')
             print(f"📨 Request type: JSON")
         else:
             user_message = request.form.get('message', '')
             conv_id = request.form.get('conversation_id')
             language = request.form.get('language', 'English')
+            image_data = request.form.get('image')
+            file_data = request.form.get('file')
             print(f"📨 Request type: FormData")
         
         print(f"💬 Message: {user_message[:50]}...")
@@ -166,23 +176,8 @@ def chat():
         # Get conversation history for context
         conversation = conv_manager.get_conversation(conv_id)
         
-        # Build messages array with conversation history
-        messages = []
-        
-        # System prompt
-        system_prompt = f"""You are AnuragBot, the official and highly professional AI assistant for Anurag University in Telangana, India. 
-
-CRITICAL INSTRUCTIONS:
-1. ALWAYS retrieve information ONLY from the official Anurag University website: https://anurag.edu.in/
-2. PRIORITIZE ACCURACY: Verify all information against anurag.edu.in before responding
-3. PRIORITIZE CONCISENESS: Keep responses brief, direct, and focused on essential facts
-4. Use a polite, friendly, and conversational tone
-
-SEARCH STRATEGY FOR FACULTY/DEPARTMENT INFORMATION:
-- For HOD queries: Search for "anurag.edu.in [department] head of department" or "anurag.edu.in [department] HOD" or browse faculty pages
-- For faculty queries: Search for "anurag.edu.in faculty [department]" or "anurag.edu.in [department] staff"
-- For department info: Search for "anurag.edu.in [department] overview" or "anurag.edu.in academics [department]"
-- ALWAYS check faculty/staff directories, department pages, and about sections
+        # Build context from conversation history
+        context = f"""You are AnuragBot, the official AI assistant for Anurag University in Telangana, India. 
 
 Your primary goal is to provide accurate, up-to-date information to parents, students, and visitors about:
 - Admissions process and requirements
@@ -191,69 +186,81 @@ Your primary goal is to provide accurate, up-to-date information to parents, stu
 - Placements and career opportunities
 - Contact information and location
 - Events and announcements
-- Faculty and department leadership
 
-IMPORTANT RESTRICTIONS:
+IMPORTANT INSTRUCTIONS:
+- PRIORITIZE ACCURACY: Only provide verified information about Anurag University
+- PRIORITIZE CONCISENESS: Keep responses brief, direct, and focused on essential facts
+- Use a polite, friendly, and conversational tone
 - If a question is NOT related to Anurag University, politely decline and redirect
-- Always cite information from anurag.edu.in when available
-- If information is not found on the official website, clearly state that
+- For information you're uncertain about, suggest visiting the official website or contacting the university
+- Always respond entirely in: {language}
 
-ALWAYS respond entirely in: {language}."""
-
-        messages.append({
-            "role": "system",
-            "content": system_prompt
-        })
+Conversation History:
+"""
         
-        # Add conversation history (last 10 messages for context)
+        # Add recent conversation history
         for msg in conversation['messages'][-10:]:
-            messages.append({
-                "role": "user" if msg['role'] == 'user' else "assistant",
-                "content": msg['content']
-            })
+            role = "User" if msg['role'] == 'user' else "AnuragBot"
+            context += f"{role}: {msg['content']}\n"
+        
+        context += f"\nUser: {user_message}\nAnuragBot:"
         
         try:
-            print(f"🌐 Calling Perplexity API...")
-            # Call Perplexity API
-            response = requests.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "sonar",
-                    "messages": messages,
-                    "temperature": 0.2,  # Lower temperature for more accurate, factual responses
-                    "max_tokens": 2048,
-                    "top_p": 0.9,
-                    "search_domain_filter": ["anurag.edu.in"],  # Only search official Anurag University website
-                    "return_citations": True,
-                    "search_recency_filter": "month",
-                    "return_images": False,
-                    "return_related_questions": False
-                },
-                timeout=30
+            print(f"🌐 Calling Gemini API...")
+            
+            # Prepare content for Gemini
+            content_parts = []
+            
+            # Add text
+            content_parts.append(context)
+            
+            # Handle image if provided
+            if image_data:
+                try:
+                    # Remove data URL prefix if present
+                    if ',' in image_data:
+                        image_data = image_data.split(',')[1]
+                    
+                    # Decode base64 image
+                    image_bytes = base64.b64decode(image_data)
+                    image = Image.open(io.BytesIO(image_bytes))
+                    content_parts.append(image)
+                    print("📷 Image attached to request")
+                except Exception as img_error:
+                    print(f"⚠️  Image processing error: {str(img_error)}")
+            
+            # Handle PDF/document if provided
+            if file_data:
+                try:
+                    # Remove data URL prefix if present
+                    if ',' in file_data:
+                        mime_type, file_data = file_data.split(',', 1)
+                    
+                    # Decode base64 file
+                    file_bytes = base64.b64decode(file_data)
+                    
+                    # For PDF files, extract text or pass to Gemini
+                    content_parts.append({
+                        'mime_type': 'application/pdf',
+                        'data': file_bytes
+                    })
+                    print("📄 PDF attached to request")
+                except Exception as file_error:
+                    print(f"⚠️  File processing error: {str(file_error)}")
+            
+            # Generate response using Gemini
+            response = model.generate_content(
+                content_parts,
+                generation_config={
+                    'temperature': 0.7,
+                    'top_p': 0.95,
+                    'top_k': 40,
+                    'max_output_tokens': 2048,
+                }
             )
             
-            print(f"✅ Perplexity API response status: {response.status_code}")
-            
-            if response.status_code != 200:
-                error_msg = f"Perplexity API Error: {response.status_code} - {response.text}"
-                print(f"❌ Chat error: {error_msg}")
-                return jsonify({
-                    'success': False,
-                    'error': error_msg,
-                    'conversation_id': conv_id
-                }), 500
-            
-            response_data = response.json()
-            bot_response = response_data['choices'][0]['message']['content']
-            
-            # Extract citations if available
-            sources = []
-            if 'citations' in response_data:
-                sources = response_data['citations']
+            bot_response = response.text
+            print(f"✅ Gemini API response received")
             
             # Add bot response to conversation
             conv_manager.add_message(conv_id, 'assistant', bot_response)
@@ -261,21 +268,11 @@ ALWAYS respond entirely in: {language}."""
             return jsonify({
                 'success': True,
                 'response': bot_response,
-                'sources': sources,
                 'conversation_id': conv_id
             })
-        
-        except requests.exceptions.Timeout:
-            error_msg = "Request timeout. Please try again."
-            print(f"❌ Timeout error")
-            return jsonify({
-                'success': False,
-                'error': error_msg,
-                'conversation_id': conv_id
-            }), 504
             
         except Exception as e:
-            error_msg = f"Perplexity API Error: {str(e)}"
+            error_msg = f"Gemini API Error: {str(e)}"
             print(f"❌ Chat error: {error_msg}")
             conv_manager.add_message(conv_id, 'assistant', 
                 f"Sorry, I encountered an error: {str(e)[:100]}")
