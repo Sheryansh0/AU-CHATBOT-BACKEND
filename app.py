@@ -121,11 +121,17 @@ def delete_conversation(conv_id):
 def chat():
     """Send a message and get a response using Perplexity API"""
     try:
+        # Log API key status (without exposing the actual key)
+        api_key_status = "configured" if PERPLEXITY_API_KEY else "missing"
+        print(f"🔑 API Key Status: {api_key_status}")
+        
         # Check if API key is configured
         if not PERPLEXITY_API_KEY:
+            error_msg = 'PERPLEXITY_API_KEY environment variable is not set on Render. Please add it in Environment settings.'
+            print(f"❌ {error_msg}")
             return jsonify({
                 'success': False,
-                'error': 'API key not configured. Please set PERPLEXITY_API_KEY in environment variables'
+                'error': error_msg
             }), 500
         
         # Get request data (handle both JSON and form data)
@@ -134,13 +140,25 @@ def chat():
             user_message = data.get('message', '')
             conv_id = data.get('conversation_id')
             language = data.get('language', 'English')
+            print(f"📨 Request type: JSON")
         else:
             user_message = request.form.get('message', '')
             conv_id = request.form.get('conversation_id')
             language = request.form.get('language', 'English')
+            print(f"📨 Request type: FormData")
+        
+        print(f"💬 Message: {user_message[:50]}...")
+        print(f"🆔 Conversation ID: {conv_id}")
+        
+        if not user_message:
+            return jsonify({
+                'success': False,
+                'error': 'Message is required'
+            }), 400
         
         if not conv_id:
             conv_id = conv_manager.create_conversation()
+            print(f"✨ Created new conversation: {conv_id}")
         
         # Add user message to conversation
         conv_manager.add_message(conv_id, 'user', user_message)
@@ -175,6 +193,7 @@ ALWAYS respond entirely in the requested language, which is: {language}."""
             })
         
         try:
+            print(f"🌐 Calling Perplexity API...")
             # Call Perplexity API
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
@@ -194,6 +213,8 @@ ALWAYS respond entirely in the requested language, which is: {language}."""
                 },
                 timeout=30
             )
+            
+            print(f"✅ Perplexity API response status: {response.status_code}")
             
             if response.status_code != 200:
                 error_msg = f"Perplexity API Error: {response.status_code} - {response.text}"
