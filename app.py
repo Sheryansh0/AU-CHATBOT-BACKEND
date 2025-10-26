@@ -128,9 +128,16 @@ def chat():
                 'error': 'API key not configured. Please set PERPLEXITY_API_KEY in environment variables'
             }), 500
         
-        user_message = request.form.get('message', '') or request.get_json().get('message', '')
-        conv_id = request.form.get('conversation_id') or request.get_json().get('conversation_id') if request.is_json else request.form.get('conversation_id')
-        language = request.form.get('language', 'English') or request.get_json().get('language', 'English') if request.is_json else 'English'
+        # Get request data (handle both JSON and form data)
+        if request.is_json:
+            data = request.get_json()
+            user_message = data.get('message', '')
+            conv_id = data.get('conversation_id')
+            language = data.get('language', 'English')
+        else:
+            user_message = request.form.get('message', '')
+            conv_id = request.form.get('conversation_id')
+            language = request.form.get('language', 'English')
         
         if not conv_id:
             conv_id = conv_manager.create_conversation()
