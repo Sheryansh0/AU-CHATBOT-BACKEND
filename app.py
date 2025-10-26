@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -14,12 +14,8 @@ import google.generativeai as genai
 
 load_dotenv()
 
-# Configure Flask to serve the React frontend
-# Use absolute path resolution for Render deployment
-template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
-static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
-
-app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='')
+# Initialize Flask app - API only (frontend hosted separately on Vercel)
+app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -99,17 +95,14 @@ class ConversationManager:
 conv_manager = ConversationManager()
 
 @app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/<path:path>')
-def catch_all(path):
-    """Serve React app for all non-API routes"""
-    if path.startswith('api/'):
-        # Let API routes 404 if not found
-        return jsonify({'error': 'API endpoint not found'}), 404
-    # Serve React index.html for client-side routing
-    return render_template('index.html')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'AU Chatbot Backend API is running',
+        'api_version': '1.0',
+        'endpoints': ['/api/conversations', '/api/chat']
+    })
 
 @app.route('/api/conversations', methods=['GET'])
 def get_conversations():
