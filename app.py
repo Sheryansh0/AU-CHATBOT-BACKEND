@@ -15,8 +15,9 @@ import google.generativeai as genai
 load_dotenv()
 
 # Configure Flask to serve the React frontend
-template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'dist')
-static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'dist')
+# Use absolute path resolution for Render deployment
+template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
 
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir, static_url_path='')
 CORS(app)
@@ -307,6 +308,18 @@ def export_conversation():
         'content': markdown,
         'filename': f"{conversation['title']}.md"
     })
+
+@app.route('/')
+def index():
+    """Serve React app"""
+    return render_template('index.html')
+
+@app.route('/<path:path>')
+def serve_spa(path):
+    """Serve React app for all non-API routes"""
+    if path.startswith('api/'):
+        return jsonify({'error': 'Not found'}), 404
+    return render_template('index.html')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
