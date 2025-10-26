@@ -309,17 +309,5 @@ def export_conversation():
         'filename': f"{conversation['title']}.md"
     })
 
-@app.route('/')
-def index():
-    """Serve React app"""
-    return render_template('index.html')
-
-@app.route('/<path:path>')
-def serve_spa(path):
-    """Serve React app for all non-API routes"""
-    if path.startswith('api/'):
-        return jsonify({'error': 'Not found'}), 404
-    return render_template('index.html')
-
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
